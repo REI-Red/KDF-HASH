@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>KDF + Salt Hash</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#666e78;--bd:#d9dde2;--ac:#2563eb;--ok:#15803d;--bad:#b91c1c;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111418;--card:#1a1f26;--tx:#e8ebef;--mut:#98a1ac;--bd:#2c333c;--ac:#60a5fa;--ok:#4ade80;--bad:#f87171}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:16px}
+main{max-width:640px;margin:0 auto}
+h1{font-size:1.3rem;margin:.2em 0}
+p.s{color:var(--mut);margin:0 0 16px;font-size:.9rem}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:16px}
+label{display:block;font-size:.85rem;color:var(--mut);margin:12px 0 4px}
+input,select{width:100%;padding:10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+.row{display:flex;gap:8px}.row>*{flex:1}
+button{padding:10px 14px;border:0;border-radius:8px;background:var(--ac);color:#fff;font:inherit;cursor:pointer;margin-top:12px}
+button.g{background:transparent;color:var(--ac);border:1px solid var(--ac)}
+.out{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.8rem;word-break:break-all;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:10px;min-height:2.4em}
+#msg{margin-top:10px;font-weight:600}
+.note{font-size:.8rem;color:var(--mut)}
+</style>
+</head>
+<body>
+<main>
+<h1>KDF + Salt Hash</h1>
+<p class="s">Master password → salt → hash (PBKDF2 via Web Crypto). Semua diproses di browser, tidak ada yang dikirim ke server.</p>
+
+<div class="card">
+<label for="pw">Master password</label>
+<div class="row"><input id="pw" type="password" autocomplete="off"><button class="g" id="tg" style="margin:0;flex:0 0 auto">Lihat</button></div>
+
+<label for="salt">Salt (hex)</label>
+<div class="row"><input id="salt" placeholder="klik Generate"><button class="g" id="gen" style="margin:0;flex:0 0 auto">Generate</button></div>
+
+<div class="row">
+<div><label for="alg">Hash</label><select id="alg"><option>SHA-256</option><option>SHA-512</option><option>SHA-384</option></select></div>
+<div><label for="it">Iterasi</label><input id="it" type="number" min="1000" value="600000"></div>
+<div><label for="len">Panjang (byte)</label><select id="len"><option>16</option><option selected>32</option><option>64</option></select></div>
+</div>
+<button id="go">Buat hash</button>
+</div>
+
+<div class="card">
+<label>Hash (hex)</label><div class="out" id="hex"></div>
+<label>Hash (base64)</label><div class="out" id="b64"></div>
+<label>Format simpan (algoritma$iterasi$salt$hash)</label><div class="out" id="rec"></div>
+<div class="note" id="time"></div>
+<button class="g" id="cp">Salin format simpan</button>
+</div>
+
+<div class="card">
+<label for="chk">Verifikasi: tempel format simpan, lalu masukkan password di atas</label>
+<input id="chk" placeholder="PBKDF2-SHA256$600000$salt$hash">
+<button id="vf">Verifikasi</button>
+<div id="msg"></div>
+</div>
+
+<p class="note">Catatan: untuk penggunaan,simpan salt + hash + iterasi, jangan pernah menyimpan password bersama salt + hash. Gunakan iterasi tinggi (min. 600.000 untuk SHA-256).</p>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const hex=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+const unhex=h=>{if(!/^([0-9a-f]{2})+$/i.test(h))throw new Error("Salt harus hex valid");return new Uint8Array(h.match(/../g).map(x=>parseInt(x,16)))};
+async function kdf(pw,saltHex,alg,it,len){
+  const enc=new TextEncoder();
+  const key=await crypto.subtle.importKey("raw",enc.encode(pw),"PBKDF2",false,["deriveBits"]);
+  return crypto.subtle.deriveBits({name:"PBKDF2",salt:unhex(saltHex),iterations:it,hash:alg},key,len*8);
+}
+$("tg").onclick=()=>{const p=$("pw");p.type=p.type==="password"?"text":"password";$("tg").textContent=p.type==="password"?"Lihat":"Sembunyi"};
+$("gen").onclick=()=>{$("salt").value=hex(crypto.getRandomValues(new Uint8Array(16)))};
+$("go").onclick=async()=>{
+  try{
+    if(!$("pw").value)throw new Error("Isi master password dulu");
+    if(!$("salt").value)$("gen").click();
+    const alg=$("alg").value,it=parseInt($("it").value),len=parseInt($("len").value);
+    $("time").textContent="Menghitung...";
+    const t=performance.now();
+    const bits=await kdf($("pw").value,$("salt").value,alg,it,len);
+    const h=hex(bits);
+    $("hex").textContent=h;
+    $("b64").textContent=btoa(String.fromCharCode(...new Uint8Array(bits)));
+    $("rec").textContent=`PBKDF2-${alg.replace("-","")}$${it}$${$("salt").value}$${h}`;
+    $("time").textContent=`Selesai dalam ${Math.round(performance.now()-t)} ms`;
+  }catch(e){$("time").textContent=e.message}
+};
+$("cp").onclick=()=>{const t=$("rec").textContent;if(t)navigator.clipboard&&navigator.clipboard.writeText(t).catch(()=>{})};
+$("vf").onclick=async()=>{
+  const m=$("msg");
+  try{
+    const [a,it,salt,h]=$("chk").value.trim().split("$");
+    const alg={PBKDF2SHA256:"SHA-256",PBKDF2SHA384:"SHA-384",PBKDF2SHA512:"SHA-512"}[a];
+    if(!alg||!it||!salt||!h)throw new Error("Format tidak valid");
+    const bits=await kdf($("pw").value,salt,alg,parseInt(it),h.length/2);
+    const got=hex(bits);
+    let d=got.length^h.length;for(let i=0;i<got.length;i++)d|=got.charCodeAt(i)^(h.charCodeAt(i)||0);
+    m.style.color=d===0?"var(--ok)":"var(--bad)";
+    m.textContent=d===0?"Cocok: password benar":"Tidak cocok: password salah";
+  }catch(e){m.style.color="var(--bad)";m.textContent=e.message}
+};
+</script>
+</body>
+</html>
